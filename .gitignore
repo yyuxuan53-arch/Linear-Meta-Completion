@@ -1,0 +1,8 @@
+*.elf
+*.hex
+*.lss
+*.o
+*.a
+build/
+__pycache__/
+.ipynb_checkpoints/
