@@ -11,7 +11,13 @@ voting) from the method used to detect system-level completion.
 - `firmware/lmc/`: Linear Meta-Consensus (LMC) firmware.
 - `firmware/flooding/`: strict full-table flooding firmware and the separately
   labelled five-UID positive control.
-- `notebooks/`: location for the exported Colab simulation notebooks.
+- `notebooks/science_robotics.ipynb`: complete, output-cleared export of the
+  paper's Google Colab notebook.
+- `notebooks/science_robotics.py`: syntax-checked plain-Python export of every
+  code cell in that notebook, retained for searching and review.
+- `scripts/method_comparison.py`: standalone method-comparison simulation and
+  figure generator. It produces both the main comparison figure and the
+  premature-transition count figure in one run.
 
 The older `dropout`, `broken`, and experimental files from the development
 directory are intentionally excluded from this final snapshot.
@@ -55,11 +61,27 @@ An AVR GCC toolchain is required.  Precompiled `.hex` files are deliberately
 not included so that binaries cannot be confused with older experimental
 builds.
 
-## Simulation notebooks
+## Simulations and figures
 
-For reproducibility, export every final Google Colab notebook as `.ipynb` and
-commit it under `notebooks/`.  A Colab share link or an “Open in Colab” badge
-can also be supplied for convenience, but should not be the only copy because
-Drive permissions and notebook contents can change.  For a paper release,
-archive the tagged GitHub version (for example through Zenodo) so the submitted
-code has a fixed version and DOI.
+Install the Python dependencies with:
+
+```sh
+python3 -m pip install -r requirements.txt
+```
+
+Run the merged method-comparison simulation and generate both figures with:
+
+```sh
+python3 scripts/method_comparison.py
+```
+
+The script saves the raw simulation archive, trial- and summary-level CSV
+files, and both PNG and PDF versions of the two figures. The supplementary
+premature-transition figure uses the final publication size of 18.4 cm by
+6.3 cm. Set `RUN_SIMULATION = False` after a completed run to redraw both
+figures from the saved simulation archive without rerunning the simulations.
+
+The complete Colab notebook is also stored locally in this repository so that
+the share link is not the only copy. For a paper release, archive a tagged
+GitHub version (for example through Zenodo) so the submitted code has a fixed
+version and DOI.

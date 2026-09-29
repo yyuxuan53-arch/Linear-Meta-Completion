@@ -1,9 +1,15 @@
-# Simulation notebooks
+# Simulation notebook
 
-Export the final Google Colab notebooks with **File > Download > Download
-`.ipynb`**, then place the files in this directory.  Commit the notebooks and
-retain optional Colab links only as convenient launch links.
+- `science_robotics.ipynb` is the complete Colab notebook used for the paper.
+  Cell outputs were cleared before committing to keep the repository compact;
+  markdown, code, cell order, and notebook metadata are retained.
+- `science_robotics.py` is a syntax-checked plain-Python export of all code
+  cells. Colab's two `%matplotlib inline` directives are commented in this
+  export; some cells still depend on Colab-only helpers, uploaded image files,
+  or cell-local configuration and are therefore best run in the notebook.
 
-No final `.ipynb` file was present on the local computer when this firmware
-snapshot was prepared, so no notebook has been inferred from intermediate
-Python scripts.
+Source notebook:
+https://colab.research.google.com/drive/1f-KGP0mXguMqBO4AJjkNc9ZTUUOlgqm3
+
+The cleaned standalone method-comparison workflow is in
+`../scripts/method_comparison.py`.
