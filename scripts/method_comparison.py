@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import json
 import csv
 from collections import deque
+from pathlib import Path
 
 # =========================================================
 # GLOBAL SETTINGS
@@ -39,30 +40,28 @@ K1 = 0.4
 K2 = 0.57
 
 LMC_DECISION_LEVEL = 0.99
-LMC_CONFIRMATION_ROUNDS = 5
+LMC_CONFIRMATION_ROUNDS = 10
 
 
 # =========================================================
 # OUTPUT FILES
 # =========================================================
-RUN_SIMULATION = True
+# False redraws the figures from the saved .npz file and avoids repeating
+# the approximately two-hour simulation.  If the file is absent, main()
+# automatically performs the simulation once and saves it.
+RUN_SIMULATION = False
 
-OUTPUT_DATA = "lmc_battery_simulation_results.npz"
+OUTPUT_DIR = Path("outputs")
+OUTPUT_DATA = OUTPUT_DIR / "lmc_initiating_simulation_results.npz"
 
-OUTPUT_PNG = (
-    "science_robotics_battery_"
-    "method_comparison_no_dropout_1x3.png"
-)
+OUTPUT_PNG = OUTPUT_DIR / "method_comparison.png"
 
-OUTPUT_PDF = (
-    "science_robotics_battery_"
-    "method_comparison_no_dropout_1x3.pdf"
-)
+OUTPUT_PDF = OUTPUT_DIR / "method_comparison.pdf"
 
-PREMATURE_TRIAL_CSV = "method_comparison_trial_events.csv"
-PREMATURE_SUMMARY_CSV = "method_comparison_premature_counts.csv"
-PREMATURE_OUTPUT_PNG = "method_comparison_premature_counts.png"
-PREMATURE_OUTPUT_PDF = "method_comparison_premature_counts.pdf"
+PREMATURE_TRIAL_CSV = OUTPUT_DIR / "method_comparison_trial_events.csv"
+PREMATURE_SUMMARY_CSV = OUTPUT_DIR / "method_comparison_premature_counts.csv"
+PREMATURE_OUTPUT_PNG = OUTPUT_DIR / "supp_premature_counts.png"
+PREMATURE_OUTPUT_PDF = OUTPUT_DIR / "supp_premature_counts.pdf"
 
 
 # =========================================================
@@ -149,7 +148,7 @@ EXPERIMENTS = [
 # =========================================================
 METHODS_NORMAL = [
 
-    "Battery threshold",
+    "Threshold",
 
     "Centralised controller",
 
@@ -165,7 +164,7 @@ METHODS_NORMAL = [
 
 METHODS_DROPOUT = [
 
-    "Battery threshold",
+    "Threshold",
 
     "Fixed-membership centralised controller",
 
@@ -184,7 +183,7 @@ METHODS_DROPOUT = [
 # =========================================================
 STYLES = {
 
-    "Battery threshold": {
+    "Threshold": {
 
         "color":
             "#ff7f0e",
@@ -294,6 +293,18 @@ STYLES = {
         "markevery":
             (20, 25),
     },
+}
+
+
+# Concise labels prevent the shared legend from overlapping at journal width.
+DISPLAY_NAMES = {
+    "Threshold": "Threshold",
+    "Centralised controller": "Centralised",
+    "Fixed-membership centralised controller": "Centralised",
+    "Full-state flooding": "Flooding",
+    "Anonymous Protocol": "Anonymous",
+    "Identity-Aware Protocol with Message Re-broadcasting (ID+R)": "ID+R",
+    "Linear Meta-Completion (LMC)": "LMC",
 }
 
 
@@ -1418,8 +1429,7 @@ def flooding_merge_table(
 def flooding_communication_round(
     tables,
     active_mask,
-    rows,
-    columns,
+    neighbor_lists,
 ):
 
     # -----------------------------------------------------
@@ -1439,63 +1449,22 @@ def flooding_communication_round(
     ]
 
 
-    deliveries = []
-
-
     # -----------------------------------------------------
     # Every active robot broadcasts ENTIRE table
     # to ALL active orthogonal neighbours.
+    # Merge directly from the fixed snapshots instead of
+    # first constructing a large duplicate delivery list.
     # -----------------------------------------------------
     for sender in np.flatnonzero(
         active_mask
     ):
 
-        neighbors = (
-            orthogonal_neighbors(
-
-                int(sender),
-
-                rows,
-
-                columns,
-
-                active_mask,
-            )
-        )
-
-
-        for receiver in neighbors:
-
-            deliveries.append(
-
-                (
-                    int(
-                        receiver
-                    ),
-
-                    snapshots[
-                        int(sender)
-                    ],
+        for receiver in neighbor_lists[int(sender)]:
+            if active_mask[receiver]:
+                flooding_merge_table(
+                    tables[int(receiver)],
+                    snapshots[int(sender)],
                 )
-            )
-
-
-    # -----------------------------------------------------
-    # Merge received tables.
-    # -----------------------------------------------------
-    for (
-        receiver,
-        sender_table,
-    ) in deliveries:
-
-        flooding_merge_table(
-
-            tables[
-                receiver
-            ],
-
-            sender_table,
-        )
 
 
 # =========================================================
@@ -1574,6 +1543,14 @@ def run_once(
         *
         columns
     )
+
+    # The grid geometry is fixed, so calculate its orthogonal topology once
+    # instead of rebuilding the same neighbor lists in every flooding round.
+    all_active = np.ones(num_agents, dtype=bool)
+    grid_neighbor_lists = [
+        orthogonal_neighbors(agent_id, rows, columns, all_active)
+        for agent_id in range(num_agents)
+    ]
 
 
     dropout = (
@@ -1938,7 +1915,7 @@ def run_once(
 
 
         results[
-            "Battery threshold"
+            "Threshold"
         ][
             round_index
         ] = np.mean(
@@ -2230,28 +2207,19 @@ def run_once(
         # =================================================
         # 4. ID+R
         # =================================================
-        idr_communication_round(
-
-            idr_memories,
-
-            idr_queues,
-
-            idr_sets,
-
-            active_mask,
-
-            current_states,
-
-            rng_idr,
-
-            rng_timeout,
-
-            round_index,
-
-            rows,
-
-            columns,
-        )
+        if not np.all(idr_transitioned[active_mask]):
+            idr_communication_round(
+                idr_memories,
+                idr_queues,
+                idr_sets,
+                active_mask,
+                current_states,
+                rng_idr,
+                rng_timeout,
+                round_index,
+                rows,
+                columns,
+            )
 
 
         for agent_id in np.flatnonzero(
@@ -2317,16 +2285,14 @@ def run_once(
         # -------------------------------------------------
         # Entire table to all orthogonal neighbours.
         # -------------------------------------------------
-        flooding_communication_round(
-
-            flooding_tables,
-
-            active_mask,
-
-            rows,
-
-            columns,
-        )
+        # Transition flags are irreversible.  Once every active robot has
+        # transitioned, further full-table propagation cannot alter a curve.
+        if not np.all(flooding_transitioned[active_mask]):
+            flooding_communication_round(
+                flooding_tables,
+                active_mask,
+                grid_neighbor_lists,
+            )
 
 
         # -------------------------------------------------
@@ -2364,7 +2330,7 @@ def run_once(
 
 
         # =================================================
-        # 6. LINEAR META-Completion (LMC)
+        # 6. LINEAR META-COMPLETION (LMC)
         # =================================================
         previous_belief = (
             lmc_belief.copy()
@@ -2929,7 +2895,10 @@ def load_experiments(
 ):
 
     saved = np.load(input_path, allow_pickle=False)
-    method_names = saved["method_names"].tolist()
+    method_names = [
+        "Threshold" if name == "Battery threshold" else name
+        for name in saved["method_names"].tolist()
+    ]
     configs = json.loads(str(saved["configs_json"]))
     method_present = saved["method_present"]
     mean_curves = saved["mean_curves"]
@@ -3032,16 +3001,16 @@ def plot_panel(
             ],
 
             label=
-                method_name,
+                DISPLAY_NAMES.get(method_name, method_name),
 
             linewidth=
-                2.6,
+                1.3,
 
             markersize=
-                7.0,
+                3.8,
 
             markeredgewidth=
-                1.0,
+                0.6,
 
             zorder=(
 
@@ -3133,8 +3102,8 @@ def plot_panel(
 
 
         ylabel = (
-            "Mean active agents "
-            "transitioned (%)"
+            "Mean number of agents "
+            "signaling Meta-Completion"
         )
 
 
@@ -3142,19 +3111,13 @@ def plot_panel(
 
         completion_label = (
 
-            "True global "
-            "completion range "
-            f"("
-            f"{completion_min:.0f}"
-            f"–"
-            f"{completion_max:.0f}"
-            f")"
+            "True global completion range"
         )
 
 
         ylabel = (
-            "Mean agents "
-            "transitioned (%)"
+            "Mean number of agents "
+            "signaling Meta-Completion"
         )
 
 
@@ -3254,7 +3217,7 @@ def plot_panel(
             ax.transAxes,
 
         fontsize=
-            22,
+            11,
 
         fontweight=
             "bold",
@@ -3305,7 +3268,7 @@ def plot_panel(
                 ax.transAxes,
 
             fontsize=
-                14,
+                9.5,
 
             ha=
                 "right",
@@ -3327,10 +3290,10 @@ def plot_panel(
 def plot_premature_transition_counts(experiments):
 
     short_names = {
-        "Battery threshold": "Local\nthreshold",
-        "Centralised controller": "Centralised\nreference",
-        "Fixed-membership centralised controller": "Centralised\nreference",
-        "Full-state flooding": "Full-state\nFlooding",
+        "Threshold": "Threshold",
+        "Centralised controller": "Centralised",
+        "Fixed-membership centralised controller": "Centralised",
+        "Full-state flooding": "Flooding",
         "Anonymous Protocol": "Anonymous",
         "Identity-Aware Protocol with Message Re-broadcasting (ID+R)": "ID+R",
         "Linear Meta-Completion (LMC)": "LMC",
@@ -3419,7 +3382,7 @@ def plot_premature_transition_counts(experiments):
     fig, axes = plt.subplots(
         1,
         len(experiments),
-        figsize=(18.4 / 2.54, 6.3 / 2.54),
+        figsize=(18.4 / 2.54, 7.0 / 2.54),
         sharey=True,
     )
     axes = np.atleast_1d(axes)
@@ -3443,22 +3406,22 @@ def plot_premature_transition_counts(experiments):
             counts,
             color=[STYLES[method]["color"] for method in methods],
             edgecolor="black",
-            linewidth=0.5,
+            linewidth=0.8,
         )
         ax.bar_label(
             bars,
             labels=[f"{count}/{total}" for count, total in zip(counts, totals)],
             padding=2,
-            fontsize=7,
+            fontsize=9.5,
         )
         ax.set_xticks(x)
         ax.set_xticklabels(
             [short_names.get(method, method) for method in methods],
             rotation=35,
             ha="right",
-            fontsize=7,
+            fontsize=9.5,
         )
-        ax.tick_params(axis="y", labelsize=8)
+        ax.tick_params(axis="y", labelsize=9.5)
         max_runs = int(np.max(totals))
         ax.set_ylim(0, max_runs + 1)
         ax.set_yticks(np.arange(0, max_runs + 1, 2))
@@ -3468,27 +3431,35 @@ def plot_premature_transition_counts(experiments):
             experiment["config"]["rows"]
             * experiment["config"]["columns"]
         )
+        panel_title = f"{panel}   $N={num_agents}$"
+        if experiment["config"].get("heterogeneous_charging", False):
+            panel_title += ", heterogeneous"
+
         ax.set_title(
-            f"{panel}   N = {num_agents}",
+            panel_title,
             loc="left",
             fontweight="bold",
-            fontsize=9,
+            fontsize=10,
         )
         if panel_index == 0:
             ax.set_ylabel(
                 "Runs with a premature transition",
-                fontsize=8,
+                fontsize=10,
             )
 
-    fig.tight_layout(w_pad=1.0)
+    fig.subplots_adjust(
+        left=0.08,
+        right=0.99,
+        bottom=0.29,
+        top=0.90,
+        wspace=0.25,
+    )
     fig.savefig(
         PREMATURE_OUTPUT_PNG,
         dpi=600,
-        bbox_inches="tight",
     )
     fig.savefig(
         PREMATURE_OUTPUT_PDF,
-        bbox_inches="tight",
     )
 
     print(f"Saved {PREMATURE_TRIAL_CSV}")
@@ -3508,6 +3479,8 @@ def plot_premature_transition_counts(experiments):
 # =========================================================
 def main():
 
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
     print(
         "="
         *
@@ -3516,7 +3489,7 @@ def main():
 
 
     print(
-        "BATTERY / META-COMPLETION CONFIGURATION"
+        "INITIATING / META-COMPLETION CONFIGURATION"
     )
 
 
@@ -3642,7 +3615,7 @@ def main():
     # =====================================================
     # RUN
     # =====================================================
-    if RUN_SIMULATION:
+    if RUN_SIMULATION or not Path(OUTPUT_DATA).is_file():
 
         experiments = [
 
@@ -3684,31 +3657,31 @@ def main():
         ],
 
         "font.size":
-            16,
+            9.5,
 
         "axes.labelsize":
-            18,
+            10,
 
         "axes.titlesize":
-            18,
+            10,
 
         "xtick.labelsize":
-            15,
+            9.5,
 
         "ytick.labelsize":
-            15,
+            9.5,
 
         "legend.fontsize":
-            14,
+            9.5,
 
         "axes.linewidth":
-            1.4,
+            0.8,
 
         "xtick.major.width":
-            1.2,
+            0.8,
 
         "ytick.major.width":
-            1.2,
+            0.8,
 
         "pdf.fonttype":
             42,
@@ -3730,7 +3703,7 @@ def main():
             3,
 
         figsize=
-            (21.0, 7.5),
+            (18.4 / 2.54, 8.8 / 2.54),
 
         sharex=
             True,
@@ -3788,33 +3761,16 @@ def main():
 
 
     fig.legend(
-
         handles,
         labels,
-
-        loc=
-            "lower center",
-
-        bbox_to_anchor=
-            (0.50, 0.015),
-
-        ncol=
-            3,
-
-        frameon=
-            False,
-
-        fontsize=
-            14,
-
-        handlelength=
-            2.5,
-
-        handletextpad=
-            0.6,
-
-        labelspacing=
-            0.65,
+        loc="lower center",
+        bbox_to_anchor=(0.50, 0.015),
+        ncol=7,
+        frameon=False,
+        fontsize=9.5,
+        handlelength=1.6,
+        handletextpad=0.4,
+        columnspacing=0.85,
     )
 
 
@@ -3827,13 +3783,13 @@ def main():
             0.985,
 
         bottom=
-            0.34,
+            0.27,
 
         top=
-            0.96,
+            0.94,
 
         wspace=
-            0.25,
+            0.28,
     )
 
 
@@ -3844,11 +3800,11 @@ def main():
 
         OUTPUT_PDF,
 
+        format=
+            "pdf",
+
         bbox_inches=
             "tight",
-
-        pad_inches=
-            0.04,
     )
 
 
@@ -3858,12 +3814,6 @@ def main():
 
         dpi=
             600,
-
-        bbox_inches=
-            "tight",
-
-        pad_inches=
-            0.04,
     )
 
 
